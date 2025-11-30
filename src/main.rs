@@ -37,7 +37,7 @@ impl Default for Stat {
 
 #[derive(Default)]
 struct FasHaserBuilder;
-struct FashHaser(u8xh);
+struct FashHaser(u16);
 type u8xh = u8x4;
 static HALF_LENGTH: usize = u8xh::LEN / 2;
 static MAGIC: u8 = 13;
@@ -46,22 +46,28 @@ impl BuildHasher for FasHaserBuilder {
     type Hasher = FashHaser;
 
     fn build_hasher(&self) -> Self::Hasher {
-        FashHaser(u8xh::splat(MAGIC))
+        // FashHaser(u8xh::splat(MAGIC))
+        FashHaser(5)
     }
 }
 
 impl Hasher for FashHaser {
     fn finish(&self) -> u64 {
-        u32::from_ne_bytes(*self.0.as_array()) as u64
+        // u32::from_ne_bytes(*self.0.as_array()) as u64
+        self.0 as u64
     }
 
     fn write(&mut self, bytes: &[u8]) {
         let (chunks, remained) = bytes.as_chunks();
         for x in chunks {
-            self.0 ^= u8xh::from_array(*x);
+            // self.0 ^= u8xh::from_array(*x);
+            self.0 ^= u16::from_ne_bytes(*x);
+            self.0 = 49u16.wrapping_mul(self.0.rotate_left(8))
             // self.0 = u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>()
         }
-        self.0 ^= u8xh::load_or_default(remained);
+        // self.0 ^= u8xh::load_or_default(remained);
+        // self.0 ^=
+        self.0 ^= *remained.first().unwrap_or(&0) as u16
     }
 }
 
@@ -94,13 +100,22 @@ fn main() {
 
     mprint(&stats);
 
+    hash_stats(&stats);
+}
+
+fn hash_stats(stats: &HashMap<Vec<u8>, Stat, MHasher>) {
     println!();
-    let tmp: HashSet<_> = stats
-        .keys()
-        .map(|v| MHasher::default().hash_one(v))
-        .collect();
-    println!("numkeys: {}", tmp.len());
-    // let
+    let mut ret = HashMap::new();
+
+    for k in stats.keys() {
+        let c: &mut usize = ret.entry(MHasher::default().hash_one(k)).or_default();
+        *c += 1usize;
+    }
+    println!("size:{}", ret.len());
+
+    let max = *ret.values().max().unwrap();
+    let mean = ret.values().sum::<usize>() as f64 / (ret.len() as f64);
+    println!("max: {max}, mean: {mean}")
 }
 
 fn mprint(stats: &HashMap<Vec<u8>, Stat, MHasher>) {
