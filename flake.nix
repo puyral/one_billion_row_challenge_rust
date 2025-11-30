@@ -36,6 +36,10 @@
           inherit system overlays;
         };
         rust = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.complete);
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rust;
+          rustc = rust;
+        };
         treefmtEval = treefmt-nix.lib.evalModule pkgs ./nix/fmt.nix;
 
         # 1. The Derivation: Fetches source and compiles ONLY the generator
@@ -102,7 +106,12 @@
             pkgs.cargo-limit
             pkgs.nixd
             rust
-          ];
+          ]
+          ++ (with rustPlatform; [
+            bindgenHook
+            cargoCheckHook
+            cargoBuildHook
+          ]);
         };
       }
     );
