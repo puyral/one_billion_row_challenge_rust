@@ -9,6 +9,7 @@ use std::{
 };
 
 use memmap2::{Mmap, MmapOptions};
+use rustc_hash::FxHashMap;
 
 #[allow(nonstandard_style)]
 type fsize = i16;
@@ -55,39 +56,56 @@ fn main() {
             max,
             sum,
             count,
-        } = stats.entry(station).or_default();
+        } =// stats.entry(station).or_default();
+            match stats.get_mut(station) {
+        Some(x) => x,
+        None => {
+           stats.entry(station.to_vec()).or_default()
+        }
+    };
         *min = (*min).min(temperature);
         *max = (*max).max(temperature);
         *sum += i64::from(temperature);
         *count += 1;
     }
 
-    let mut all: Vec<_> = stats.into_iter().collect();
-    all.sort_unstable_by_key(|(k, _)| *k);
+    let mut all: Vec<(Vec<u8>, Stat)> = stats.into_iter().collect();
+    all.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     print!("{{");
 
     let last = all.pop().unwrap();
     for (station, stat) in all {
         // safe
-        let station = unsafe { ::std::str::from_utf8_unchecked(station) };
+        let station = unsafe { ::std::str::from_utf8_unchecked(&station) };
         print!("{station}={stat}, ")
     }
     {
         let (station, stat) = last;
         // safe
-        let station = unsafe { ::std::str::from_utf8_unchecked(station) };
+        let station = unsafe { ::std::str::from_utf8_unchecked(&station) };
         print!("{station}:={stat}}}")
     }
 }
 
+// fn get_state<'a>(map: &'a mut FxHashMap<Vec<u8>, Stat>, station : &[u8]) -> &'a mut Stat {
+//     match map.get_mut(station) {
+//         Some(x) => x,
+//         None => {
+//            map.entry(station.to_vec()).or_default()
+//         }
+//     }
+
+// }
+
 fn parse_value(str: &[u8]) -> fsize {
     let n = str.len();
+    let sign = str[0] == b'-';
+    let has_4th = !sign && (n >= 4);
     let res = get_value(str[n - 1])
         + 10 * get_value(str[n - 3])
-        + (((n >= 4) && str[n - 4] != b'-') as fsize) * 100 * get_value(str[n.saturating_sub(4)]);
+        + (has_4th as fsize) * 100 * get_value(str[n.saturating_sub(4)]);
 
-    let sign = str[0] == b'-';
     res - 2 * (sign as fsize) * res
 }
 
