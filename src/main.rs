@@ -1,12 +1,12 @@
 #![feature(portable_simd)]
 #![allow(unused)]
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     fmt::Display,
     fs::{self, File},
-    hash::{BuildHasher, Hasher},
+    hash::{BuildHasher, Hash, Hasher},
     io::{BufRead, BufReader},
-    simd::{prelude::SimdPartialEq, u8x8, u8x16, u8x32, u8x64},
+    simd::{prelude::SimdPartialEq, u8x4, u8x8, u8x16, u8x32, u8x64},
     str::Chars,
 };
 
@@ -35,12 +35,45 @@ impl Default for Stat {
     }
 }
 
+#[derive(Default)]
+struct FasHaserBuilder;
+struct FashHaser(u8xh);
+type u8xh = u8x4;
+static HALF_LENGTH: usize = u8xh::LEN / 2;
+static MAGIC: u8 = 13;
+
+impl BuildHasher for FasHaserBuilder {
+    type Hasher = FashHaser;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        FashHaser(u8xh::splat(MAGIC))
+    }
+}
+
+impl Hasher for FashHaser {
+    fn finish(&self) -> u64 {
+        u32::from_ne_bytes(*self.0.as_array()) as u64
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let (chunks, remained) = bytes.as_chunks();
+        for x in chunks {
+            self.0 ^= u8xh::from_array(*x);
+            // self.0 = u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>()
+        }
+        self.0 ^= u8xh::load_or_default(remained);
+    }
+}
+
+// type MHasher = rustc_hash::FxBuildHasher;
+type MHasher = FasHaserBuilder;
+
 fn main() {
     let f = File::open("measurements.txt").unwrap();
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
 
-    let mut stats = HashMap::with_capacity_and_hasher(10000, rustc_hash::FxBuildHasher);
+    let mut stats = HashMap::with_capacity_and_hasher(10000, MHasher::default()); //  ahash::RandomState::new());
     let iter = Finder::new(&f);
 
     for (station, temperature) in iter {
@@ -59,7 +92,19 @@ fn main() {
         *count += 1;
     }
 
-    let mut all: Vec<(Vec<u8>, Stat)> = stats.into_iter().collect();
+    mprint(&stats);
+
+    println!();
+    let tmp: HashSet<_> = stats
+        .keys()
+        .map(|v| MHasher::default().hash_one(v))
+        .collect();
+    println!("numkeys: {}", tmp.len());
+    // let
+}
+
+fn mprint(stats: &HashMap<Vec<u8>, Stat, MHasher>) {
+    let mut all: Vec<(&Vec<u8>, &Stat)> = stats.iter().collect();
     all.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     print!("{{");
@@ -67,14 +112,14 @@ fn main() {
     let last = all.pop().unwrap();
     for (station, stat) in all {
         // safe
-        let station = unsafe { ::std::str::from_utf8_unchecked(&station) };
+        let station = unsafe { ::std::str::from_utf8_unchecked(station) };
         print!("{station}={stat}, ")
     }
     {
         let (station, stat) = last;
         // safe
-        let station = unsafe { ::std::str::from_utf8_unchecked(&station) };
-        print!("{station}:={stat}}}")
+        let station = unsafe { ::std::str::from_utf8_unchecked(station) };
+        println!("{station}:={stat}}}")
     }
 }
 
