@@ -8,6 +8,7 @@ use std::{
     str::Chars,
 };
 
+use memchr::Memchr2;
 use memmap2::{Mmap, MmapOptions};
 use rustc_hash::FxHashMap;
 
@@ -37,20 +38,14 @@ fn main() {
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
 
-    // let mut stats = HashMap::with_capacity(10000);
     let mut stats = HashMap::with_capacity_and_hasher(10000, rustc_hash::FxBuildHasher);
-    // let mut stats = intmap::IntMap::with_capacity(10000);
+    let iter = Finder {
+        iter: Memchr2::new(b';', b'\n', &f),
+        data: &f,
+        current: 0,
+    };
 
-    for l in f.split(|x| *x == b'\n') {
-        if l.is_empty() {
-            break;
-        }
-
-        let mut field = l.rsplitn(2, |x| *x == b';');
-        let temperature = field.next().unwrap();
-        let station = field.next().unwrap();
-        // the readme promised
-        let temperature = parse_value(temperature);
+    for (station, temperature) in iter {
         let Stat {
             min,
             max,
@@ -88,16 +83,6 @@ fn main() {
     }
 }
 
-// fn get_state<'a>(map: &'a mut FxHashMap<Vec<u8>, Stat>, station : &[u8]) -> &'a mut Stat {
-//     match map.get_mut(station) {
-//         Some(x) => x,
-//         None => {
-//            map.entry(station.to_vec()).or_default()
-//         }
-//     }
-
-// }
-
 fn parse_value(str: &[u8]) -> fsize {
     let n = str.len();
     let sign = str[0] == b'-';
@@ -129,11 +114,36 @@ impl Display for Stat {
     }
 }
 
+struct Finder<'a> {
+    iter: Memchr2<'a>,
+    data: &'a [u8],
+    current: usize,
+}
+
+impl<'a> Iterator for Finder<'a> {
+    type Item = (&'a [u8], i16);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let station_idx = self.iter.next()?;
+        let temperature_idx = self.iter.next()?;
+
+        let station = &self.data[self.current..station_idx];
+        let temperature = &self.data[station_idx + 1..temperature_idx];
+
+        let temperature = parse_value(temperature);
+
+        self.current = temperature_idx + 1;
+        Some((station, temperature))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::btree_map::Values;
 
-    use crate::parse_value;
+    use memchr::Memchr2;
+
+    use crate::{Finder, parse_value};
 
     #[test]
     fn parse_value_sound() {
@@ -145,6 +155,22 @@ mod test {
             let pv = parse_value(v.as_bytes());
             let truev: f64 = v.parse().unwrap();
             assert_eq!(truev, (pv as f64) / 10.)
+        }
+    }
+
+    #[test]
+    fn iter_sound() {
+        let values = "atr;-4.5\nrrr;78.0\nasdf;0.1\ndsaf;-0.0\n".as_bytes();
+
+        let mut finder = Finder {
+            iter: Memchr2::new(b';', b'\n', values),
+            data: values,
+            current: 0,
+        };
+
+        for (s, t) in finder {
+            dbg!(str::from_utf8(s).unwrap());
+            dbg!(t);
         }
     }
 }
