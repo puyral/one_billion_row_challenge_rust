@@ -1,8 +1,11 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     fs::File,
-    io::{BufRead, BufReader}, str::Chars,
+    io::{BufRead, BufReader},
+    str::Chars,
 };
+
+use memmap2::{Mmap, MmapOptions};
 
 #[allow(nonstandard_style)]
 type fsize = f32;
@@ -27,19 +30,24 @@ impl Default for Stat {
 
 fn main() {
     let f = File::open("measurements.txt").unwrap();
-
-
-    let f = BufReader::new(f);
-
+    let f = unsafe { Mmap::map(&f).unwrap() };
+    f.advise(memmap2::Advice::Sequential).unwrap();
 
     let mut stats = HashMap::with_capacity(10000);
 
-    for line in f.split(b'\n') {
-        let l = Vec::leak(line.unwrap());
+    for l in f.split(|x| *x == b'\n') {
+        if l.is_empty() {
+            break;
+        }
+
+
         let mut field = l.rsplitn(2, |x| *x == b';');
         let temperature = field.next().unwrap();
         let station = field.next().unwrap();
-        let temperature = std::str::from_utf8(temperature).unwrap().parse().unwrap();
+        // the readme promised
+        let temperature = unsafe { std::str::from_utf8_unchecked(temperature) }
+            .parse()
+            .unwrap();
         let Stat {
             min,
             max,
@@ -69,7 +77,8 @@ fn main() {
     ) in all
     {
         let mean = sum / (count as fsize);
-        let station = ::std::str::from_utf8(station).unwrap();
+        // safe
+        let station = unsafe { ::std::str::from_utf8_unchecked(station) };
         print!("{station}={min:.1}/{mean:.1}/{max:.1}, ")
     }
     {
@@ -83,7 +92,8 @@ fn main() {
             },
         ) = last;
         let mean = sum / (count as fsize);
-        let station = ::std::str::from_utf8(station).unwrap();
+        // safe
+        let station = unsafe { ::std::str::from_utf8_unchecked(station) };
         print!("{station}:={min:.1}/{mean:.1}/{max:.1}}}")
     }
 }
