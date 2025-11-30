@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "intmap"
+version = "3.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2e611826a1868311677fdcdfbec9e8621d104c732d080f546a854530232f0ee"
+
+[[package]]
 name = "libc"
 version = "0.2.177"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21,5 +27,13 @@ dependencies = [
 name = "one_billion_row_challenge_rust"
 version = "0.1.0"
 dependencies = [
+ "intmap",
  "memmap2",
+ "rustc-hash",
 ]
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
