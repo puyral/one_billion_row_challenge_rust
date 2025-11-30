@@ -1,0 +1,3 @@
+[submodule "hashbrown"]
+	path = hashbrown
+	url = git@github.com:rust-lang/hashbrown.git
