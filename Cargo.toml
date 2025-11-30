@@ -10,3 +10,4 @@ edition = "2024"
 [profile.release]
 lto="fat"
 panic="abort"
+debug = true

@@ -102,11 +102,15 @@
           buildInputs = [
             generateScript
             pkgs.jdk21_headless
-            pkgs.cargo-expand
-            pkgs.cargo-limit
             pkgs.nixd
             rust
           ]
+          ++ (with pkgs; [
+            cargo-expand
+            cargo-limit
+            perf
+            cargo-flamegraph
+          ])
           ++ (with rustPlatform; [
             bindgenHook
             cargoCheckHook

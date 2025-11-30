@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader}, str::Chars,
 };
 
 #[allow(nonstandard_style)]
@@ -26,17 +26,20 @@ impl Default for Stat {
 }
 
 fn main() {
-    println!("Hello, world!");
-
     let f = File::open("measurements.txt").unwrap();
+
+
     let f = BufReader::new(f);
+
 
     let mut stats = HashMap::with_capacity(10000);
 
-    for line in f.lines() {
-        let l = String::leak(line.unwrap());
-        let (station, temperature) = l.split_once(';').unwrap();
-        let temperature = temperature.parse().unwrap();
+    for line in f.split(b'\n') {
+        let l = Vec::leak(line.unwrap());
+        let mut field = l.rsplitn(2, |x| *x == b';');
+        let temperature = field.next().unwrap();
+        let station = field.next().unwrap();
+        let temperature = std::str::from_utf8(temperature).unwrap().parse().unwrap();
         let Stat {
             min,
             max,
@@ -66,6 +69,7 @@ fn main() {
     ) in all
     {
         let mean = sum / (count as fsize);
+        let station = ::std::str::from_utf8(station).unwrap();
         print!("{station}={min:.1}/{mean:.1}/{max:.1}, ")
     }
     {
@@ -79,6 +83,7 @@ fn main() {
             },
         ) = last;
         let mean = sum / (count as fsize);
+        let station = ::std::str::from_utf8(station).unwrap();
         print!("{station}:={min:.1}/{mean:.1}/{max:.1}}}")
     }
 }
