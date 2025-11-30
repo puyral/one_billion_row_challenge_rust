@@ -13,6 +13,7 @@ use std::{
 use memchr::Memchr2;
 use memmap2::{Mmap, MmapOptions};
 use rustc_hash::FxHashMap;
+use smallvec::{SmallVec, ToSmallVec};
 
 #[allow(nonstandard_style)]
 type fsize = i16;
@@ -38,9 +39,9 @@ impl Default for Stat {
 #[derive(Default)]
 struct FasHaserBuilder;
 struct FashHaser(u16);
-type u8xh = u8x4;
-static HALF_LENGTH: usize = u8xh::LEN / 2;
-static MAGIC: u8 = 13;
+
+// type ArrayType = SmallVec<[u8; 16]>;
+type ArrayType = Vec<u8>;
 
 impl BuildHasher for FasHaserBuilder {
     type Hasher = FashHaser;
@@ -71,8 +72,40 @@ impl Hasher for FashHaser {
     }
 }
 
+
+#[derive(Default)]
+struct FasHaserBuilderSimd;
+struct FashHaserSimd(u8xh);
+type u8xh = u8x4;
+static HALF_LENGTH: usize = u8xh::LEN / 2;
+static MAGIC: u8 = 13;
+
+impl BuildHasher for FasHaserBuilderSimd {
+    type Hasher = FashHaserSimd;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        FashHaserSimd(u8xh::splat(MAGIC))
+    }
+}
+
+impl Hasher for FashHaserSimd {
+    fn finish(&self) -> u64 {
+        u32::from_ne_bytes(*self.0.as_array()) as u64
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let (chunks, remained) = bytes.as_chunks();
+        for x in chunks {
+            self.0 ^= u8xh::from_array(*x);
+            // self.0 = u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>()
+        }
+        self.0 ^= u8xh::load_or_default(remained);
+    }
+}
+
 // type MHasher = rustc_hash::FxBuildHasher;
-type MHasher = FasHaserBuilder;
+// type MHasher = FasHaserBuilder;
+type MHasher = FasHaserBuilderSimd;
 
 fn main() {
     let f = File::open("measurements.txt").unwrap();
@@ -90,7 +123,7 @@ fn main() {
             count,
         } = match stats.get_mut(station) {
             Some(x) => x,
-            None => stats.entry(station.to_vec()).or_default(),
+            None => stats.entry(station.into()).or_default(),
         };
         *min = (*min).min(temperature);
         *max = (*max).max(temperature);
@@ -100,10 +133,10 @@ fn main() {
 
     mprint(&stats);
 
-    hash_stats(&stats);
+    // hash_stats(&stats);
 }
 
-fn hash_stats(stats: &HashMap<Vec<u8>, Stat, MHasher>) {
+fn hash_stats(stats: &HashMap<ArrayType, Stat, MHasher>) {
     println!();
     let mut ret = HashMap::new();
 
@@ -118,8 +151,12 @@ fn hash_stats(stats: &HashMap<Vec<u8>, Stat, MHasher>) {
     println!("max: {max}, mean: {mean}")
 }
 
-fn mprint(stats: &HashMap<Vec<u8>, Stat, MHasher>) {
-    let mut all: Vec<(&Vec<u8>, &Stat)> = stats.iter().collect();
+fn mas_slice(x: &ArrayType) -> &[u8] {
+    x
+}
+
+fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
+    let mut all: Vec<(&[u8], &Stat)> = stats.iter().map(|(x, v)| (mas_slice(x), v)).collect();
     all.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     print!("{{");
