@@ -49,13 +49,10 @@ fn main() {
             max,
             sum,
             count,
-        } =// stats.entry(station).or_default();
-            match stats.get_mut(station) {
-        Some(x) => x,
-        None => {
-           stats.entry(station.to_vec()).or_default()
-        }
-    };
+        } = match stats.get_mut(station) {
+            Some(x) => x,
+            None => stats.entry(station.to_vec()).or_default(),
+        };
         *min = (*min).min(temperature);
         *max = (*max).max(temperature);
         *sum += i64::from(temperature);
