@@ -1,6 +1,13 @@
 #![feature(portable_simd)]
 use std::{
-    collections::{HashMap, hash_map::Entry}, fmt::Display, fs::{self, File}, hash::{BuildHasher, Hasher}, io::{BufRead, BufReader}, os::linux::raw::stat, simd::{prelude::SimdPartialEq, u8x8}, str::Chars
+    collections::{HashMap, hash_map::Entry},
+    fmt::Display,
+    fs::{self, File},
+    hash::{BuildHasher, Hasher},
+    io::{BufRead, BufReader},
+    os::linux::raw::stat,
+    simd::{prelude::SimdPartialEq, u8x8, u8x16, u8x32, u8x64},
+    str::Chars,
 };
 
 use memchr::Memchr2;
@@ -119,33 +126,83 @@ impl<'a> Iterator for Finder<'a> {
     type Item = (&'a [u8], i16);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let station_idx = memchr::memchr(b';', self.data)?;
-        let ndata = &self.data[station_idx + 1..];
+        // let station_idx = memchr::memchr(b';', self.data)?;
 
-        // let station_idx;
+        // let station_idx = 'a: {
+        //     let delimiter = u8x16::splat(b';');
+        //     let line = u8x16::load_or_default(self.data);
+        //     let delimeq = delimiter.simd_eq(line);
+        //     if let Some(idx) = delimeq.first_set() {
+        //         break 'a idx;
+        //     }
+        //     if self.data.len() < 16 {
+        //         return None;
+        //     }
+        //     memchr::memchr(b';', &self.data[16..])? + 16
 
-        // {
+        //     // let line = u8x64::load_or_default(self.data);
+        //     // let delimeq = delimiter.simd_eq(line);
+
+        //     // unsafe { delimeq.first_set().unwrap_unchecked() }
+        // };
+
+        // let ndata = &self.data[station_idx + 1..];
+
+        // // with simd
         // let delimiter = u8x8::splat(b'\n'); // 5 max
-
-        // }
-
-
-        // with simd
-        let delimiter = u8x8::splat(b'\n'); // 5 max
-        let line = u8x8::load_or_default(ndata);
-        let delimeq =  delimiter.simd_eq(line);
-        // We know
-        let temperature_idx = unsafe{ delimeq.first_set().unwrap_unchecked()};
-        // let temperature_idx = memchr::memchr(b'\n', ndata)?;
+        // let line = u8x8::load_or_default(ndata);
+        // let delimeq = delimiter.simd_eq(line);
+        // // We know
+        // let temperature_idx = unsafe { delimeq.first_set().unwrap_unchecked() };
+        // // let temperature_idx = memchr::memchr(b'\n', ndata)?;
+        let (station_idx, temperature_idx) = find_next(self.data)?;
 
         let station = &self.data[0..station_idx];
-        let temperature = &ndata[0..temperature_idx];
+        let temperature = &self.data[station_idx + 1..station_idx + temperature_idx + 1];
         let temperature = parse_value(temperature);
 
-        self.data = &ndata[temperature_idx + 1..];
+        self.data = &self.data[station_idx + temperature_idx + 2..];
 
         Some((station, temperature))
     }
+}
+
+type u8xx = u8x16;
+static NUMER_SKIPPED: usize = u8xx::LEN;
+
+fn find_next(data: &[u8]) -> Option<(usize, usize)> {
+    let delimiter_nl = u8xx::splat(b'\n');
+    let delimiter_sc = u8xx::splat(b';');
+    let line = u8xx::load_or_default(data);
+
+    let delimeq_sc = delimiter_sc.simd_eq(line);
+    let delimeq_nl = delimiter_nl.simd_eq(line);
+
+    match (delimeq_sc.first_set(), delimeq_nl.first_set()) {
+        (Some(idxs), Some(idxt)) => Some((idxs, idxt - idxs - 1)),
+        (Some(idxs), None) => Some((idxs, find_temperature_short(&data[idxs + 1..]))),
+        _ => {
+            let idxs = find_station_slow(data)?;
+            let idxt = find_temperature_short(&data[idxs + 1..]);
+            Some((idxs, idxt))
+        }
+    }
+}
+
+fn find_station_slow(data: &[u8]) -> Option<usize> {
+    if data.len() >= NUMER_SKIPPED {
+        Some(memchr::memchr(b';', &data[NUMER_SKIPPED - 1..])? + NUMER_SKIPPED - 1)
+    } else {
+        None
+    }
+}
+
+fn find_temperature_short(data: &[u8]) -> usize {
+    let delimiter = u8x8::splat(b'\n'); // 5 max
+    let line = u8x8::load_or_default(data);
+    let delimeq = delimiter.simd_eq(line);
+    // We know
+    unsafe { delimeq.first_set().unwrap_unchecked() }
 }
 
 #[cfg(test)]
