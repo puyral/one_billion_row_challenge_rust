@@ -1,11 +1,6 @@
+#![feature(portable_simd)]
 use std::{
-    collections::{HashMap, hash_map::Entry},
-    fmt::Display,
-    fs::{self, File},
-    hash::{BuildHasher, Hasher},
-    io::{BufRead, BufReader},
-    os::linux::raw::stat,
-    str::Chars,
+    collections::{HashMap, hash_map::Entry}, fmt::Display, fs::{self, File}, hash::{BuildHasher, Hasher}, io::{BufRead, BufReader}, os::linux::raw::stat, simd::{prelude::SimdPartialEq, u8x8}, str::Chars
 };
 
 use memchr::Memchr2;
@@ -39,11 +34,7 @@ fn main() {
     f.advise(memmap2::Advice::Sequential).unwrap();
 
     let mut stats = HashMap::with_capacity_and_hasher(10000, rustc_hash::FxBuildHasher);
-    let iter = Finder {
-        iter: Memchr2::new(b';', b'\n', &f),
-        data: &f,
-        current: 0,
-    };
+    let iter = Finder::new(&f);
 
     for (station, temperature) in iter {
         let Stat {
@@ -115,34 +106,50 @@ impl Display for Stat {
 }
 
 struct Finder<'a> {
-    iter: Memchr2<'a>,
     data: &'a [u8],
-    current: usize,
+}
+
+impl<'a> Finder<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
 }
 
 impl<'a> Iterator for Finder<'a> {
     type Item = (&'a [u8], i16);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let station_idx = self.iter.next()?;
-        let temperature_idx = self.iter.next()?;
+        let station_idx = memchr::memchr(b';', self.data)?;
+        let ndata = &self.data[station_idx + 1..];
 
-        let station = &self.data[self.current..station_idx];
-        let temperature = &self.data[station_idx + 1..temperature_idx];
+        // let station_idx;
 
+        // {
+        // let delimiter = u8x8::splat(b'\n'); // 5 max
+
+        // }
+
+
+        // with simd
+        let delimiter = u8x8::splat(b'\n'); // 5 max
+        let line = u8x8::load_or_default(ndata);
+        let delimeq =  delimiter.simd_eq(line);
+        // We know
+        let temperature_idx = unsafe{ delimeq.first_set().unwrap_unchecked()};
+        // let temperature_idx = memchr::memchr(b'\n', ndata)?;
+
+        let station = &self.data[0..station_idx];
+        let temperature = &ndata[0..temperature_idx];
         let temperature = parse_value(temperature);
 
-        self.current = temperature_idx + 1;
+        self.data = &ndata[temperature_idx + 1..];
+
         Some((station, temperature))
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::collections::btree_map::Values;
-
-    use memchr::Memchr2;
-
     use crate::{Finder, parse_value};
 
     #[test]
@@ -162,11 +169,7 @@ mod test {
     fn iter_sound() {
         let values = "atr;-4.5\nrrr;78.0\nasdf;0.1\ndsaf;-0.0\n".as_bytes();
 
-        let mut finder = Finder {
-            iter: Memchr2::new(b';', b'\n', values),
-            data: values,
-            current: 0,
-        };
+        let finder = Finder::new(values);
 
         for (s, t) in finder {
             dbg!(str::from_utf8(s).unwrap());
