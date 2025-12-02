@@ -146,7 +146,7 @@
             # -march=native   : Optimize specifically for THIS cpu (SIMD, AVX, etc.)
             # -fopenmp        : Enable multi-threading via OpenMP
             # -flto           : Link Time Optimization
-            
+
             echo "Compiling C++ solution with high optimizations..."
             g++ -std=c++23 -O3 -march=native -fopenmp -flto \
                 friend_solution.cpp -o friend

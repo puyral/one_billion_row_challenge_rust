@@ -72,7 +72,6 @@ impl Hasher for FashHaser {
     }
 }
 
-
 #[derive(Default)]
 struct FasHaserBuilderSimd;
 struct FashHaserSimd(u8xh);
