@@ -5,6 +5,8 @@ use std::hash::Hash;
 
 use smallvec::SmallVec;
 
+use crate::HashStat;
+
 static MAP_SIZE: usize = 1 << (10_000usize.highest_one().unwrap() + 1);
 static MASK: usize = MAP_SIZE - 1;
 
@@ -53,6 +55,10 @@ impl<K, V, H> StackMap<K, V, H> {
             let ContentBucket { key, value, .. } = b.as_ref()?;
             Some((key, value))
         })
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.iter().map(|(k, _)| k)
     }
 }
 
@@ -186,5 +192,28 @@ impl<K, V> ContentBucket<K, V> {
             ord => return ord,
         }
         Ordering::Equal
+    }
+}
+
+impl<K, V, H> HashStat for StackMap<K, V, H>
+where
+    K: Hash + Ord,
+    H: BuildHasher + Default,
+{
+    fn hash_stats(stats: &Self) {
+        println!();
+        let mut ret = std::collections::HashMap::new();
+
+        for k in stats.keys() {
+            let c: &mut usize = ret
+                .entry(H::default().hash_one(k) as usize & MASK)
+                .or_default();
+            *c += 1usize;
+        }
+        println!("size:{}", ret.len());
+
+        let max = *ret.values().max().unwrap();
+        let mean = ret.values().sum::<usize>() as f64 / (ret.len() as f64);
+        println!("max: {max}, mean: {mean}")
     }
 }

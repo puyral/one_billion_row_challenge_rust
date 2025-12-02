@@ -67,23 +67,7 @@ fn main() {
 
     mprint(&stats);
 
-    // hash_stats(&stats);
-}
-
-/// prints stats about the hash
-fn hash_stats(stats: &HashMap<ArrayType, Stat, MHasher>) {
-    println!();
-    let mut ret = HashMap::new();
-
-    for k in stats.keys() {
-        let c: &mut usize = ret.entry(MHasher::default().hash_one(k)).or_default();
-        *c += 1usize;
-    }
-    println!("size:{}", ret.len());
-
-    let max = *ret.values().max().unwrap();
-    let mean = ret.values().sum::<usize>() as f64 / (ret.len() as f64);
-    println!("max: {max}, mean: {mean}")
+    HashStat::hash_stats(&stats);
 }
 
 /// outputs the results
@@ -123,4 +107,26 @@ fn init_map() -> HMap {
 fn insert_or_default<'a>(stats: &'a mut HMap, station: &[u8]) -> &'a mut Stat {
     // stats.entry(station.into()).or_default()
     stats.insert(station.into(), Default::default())
+}
+
+trait HashStat {
+    fn hash_stats(stats: &Self);
+}
+
+impl HashStat for HashMap<ArrayType, Stat, MHasher> {
+    /// prints stats about the hash
+    fn hash_stats(stats: &Self) {
+        println!();
+        let mut ret = HashMap::new();
+
+        for k in stats.keys() {
+            let c: &mut usize = ret.entry(MHasher::default().hash_one(k)).or_default();
+            *c += 1usize;
+        }
+        println!("size:{}", ret.len());
+
+        let max = *ret.values().max().unwrap();
+        let mean = ret.values().sum::<usize>() as f64 / (ret.len() as f64);
+        println!("max: {max}, mean: {mean}")
+    }
 }
