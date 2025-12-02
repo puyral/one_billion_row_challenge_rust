@@ -6,3 +6,4 @@ result
 measurements.txt
 perf.*
 flamegraph.*
+.vscode
