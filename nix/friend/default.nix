@@ -31,7 +31,7 @@ rec {
 
     installPhase = ''
       mkdir -p $out/bin
-      cp friend/$out/bin/
+      cp friend $out/bin/
     '';
   };
 

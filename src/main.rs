@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![feature(hasher_prefixfree_extras)]
 #![allow(unused)]
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -38,10 +39,10 @@ impl Default for Stat {
 
 #[derive(Default)]
 struct FasHaserBuilder;
-struct FashHaser(u16);
+struct FashHaser(uhash);
 
-// type ArrayType = SmallVec<[u8; 16]>;
-type ArrayType = Vec<u8>;
+type uhash = usize;
+static HALF_SIZE: usize = std::mem::size_of::<uhash>() / 2;
 
 impl BuildHasher for FasHaserBuilder {
     type Hasher = FashHaser;
@@ -62,14 +63,34 @@ impl Hasher for FashHaser {
         let (chunks, remained) = bytes.as_chunks();
         for x in chunks {
             // self.0 ^= u8xh::from_array(*x);
-            self.0 ^= u16::from_ne_bytes(*x);
-            self.0 = 49u16.wrapping_mul(self.0.rotate_left(8))
-            // self.0 = u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>()
+            self.0 = uhash::wrapping_mul(49, self.0.rotate_right(HALF_SIZE as u32))
+                ^ uhash::from_ne_bytes(*x);
         }
-        // self.0 ^= u8xh::load_or_default(remained);
-        // self.0 ^=
-        self.0 ^= *remained.first().unwrap_or(&0) as u16
+        // u32::from
+        // self.0 ^= *remained.first().unwrap_or(&0) as u32
+        self.0 = uhash::wrapping_mul(49, self.0.rotate_right(HALF_SIZE as u32))
+            ^ to_usize_padded(remained)
     }
+}
+
+pub fn to_usize_padded(slice: &[u8]) -> uhash {
+    // 1. Create a zeroed buffer on the stack (register width)
+    const SIZE: usize = std::mem::size_of::<uhash>();
+    debug_assert!(slice.len() <= SIZE);
+    let mut buf = [0u8; SIZE];
+
+    // 2. Determine how many bytes we can actually read
+    // let len = slice.len().min(SIZE);
+
+    // 3. Copy only the available bytes
+    // unsafe is used here for copy_nonoverlapping, which is slightly faster
+    // than slice::copy_from_slice because it skips some bounds checks.
+    unsafe {
+        std::ptr::copy_nonoverlapping(slice.as_ptr(), buf.as_mut_ptr(), slice.len());
+    }
+
+    // 4. Convert to usize
+    usize::from_ne_bytes(buf)
 }
 
 #[derive(Default)]
@@ -95,16 +116,34 @@ impl Hasher for FashHaserSimd {
     fn write(&mut self, bytes: &[u8]) {
         let (chunks, remained) = bytes.as_chunks();
         for x in chunks {
-            self.0 ^= u8xh::from_array(*x);
-            // self.0 = u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>()
+            self.0 = (u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>())
+                ^ u8xh::from_array(*x);
         }
         self.0 ^= u8xh::load_or_default(remained);
     }
+
+    fn write_length_prefix(&mut self, len: usize) {}
+
+    fn write_usize(&mut self, i: usize) {
+        let [x, y] = split_u64_unsafe(i as u64);
+        self.0 = (u8xh::splat(MAGIC) * self.0.rotate_elements_right::<HALF_LENGTH>()) ^ x ^ y;
+    }
 }
 
+fn split_u64_unsafe(value: u64) -> [u8x4; 2] {
+    unsafe {
+        // Transmute u64 directly into an array of two u8x4s
+        // This relies on u8x4 having the same layout as [u8; 4]
+        std::mem::transmute(value)
+    }
+}
+
+// type ArrayType = SmallVec<[u8; 16]>;
+type ArrayType = Vec<u8>;
+
 // type MHasher = rustc_hash::FxBuildHasher;
-type MHasher = FasHaserBuilder;
-// type MHasher = FasHaserBuilderSimd;
+// type MHasher = FasHaserBuilder;
+type MHasher = FasHaserBuilderSimd;
 
 fn main() {
     let f = File::open("measurements.txt").unwrap();
@@ -178,14 +217,16 @@ fn parse_value(str: &[u8]) -> fsize {
     let n = str.len();
     let sign = str[0] == b'-';
     let has_4th = (n == 5) | ((n == 4) & !sign);
-    let res = get_value(str[n - 1])
-        + 10 * get_value(str[n - 3])
-        + (has_4th as fsize) * 100 * get_value(str[n.saturating_sub(4)]);
+    let res = get_value(str, n - 1)
+        + 10 * get_value(str, n - 3)
+        + (has_4th as fsize) * 100 * get_value(str, n.saturating_sub(4));
 
     res - 2 * (sign as fsize) * res
 }
 
-fn get_value(c: u8) -> fsize {
+fn get_value(str: &[u8], idx: usize) -> fsize {
+    debug_assert!(idx < str.len());
+    let c = unsafe { str.get_unchecked(idx) };
     c.wrapping_sub(b'0') as fsize
 }
 
