@@ -1,5 +1,6 @@
 #![feature(portable_simd)]
 #![feature(hasher_prefixfree_extras)]
+#![feature(int_lowest_highest_one)]
 #![allow(unused)]
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -25,6 +26,10 @@ use parser::Finder;
 mod stats;
 use stats::Stat;
 
+use crate::hashmap::StackMap;
+
+mod hashmap;
+
 #[allow(nonstandard_style)]
 type fsize = i16;
 
@@ -41,7 +46,7 @@ fn main() {
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
 
-    let mut stats = HashMap::with_capacity_and_hasher(10000, MHasher::default()); //  ahash::RandomState::new());
+    let mut stats = init_map();
     let iter = Finder::new(&f);
 
     for (station, temperature) in iter {
@@ -52,7 +57,7 @@ fn main() {
             count,
         } = match stats.get_mut(station) {
             Some(x) => x,
-            None => stats.entry(station.into()).or_default(),
+            None => insert_or_default(&mut stats, station),
         };
         *min = (*min).min(temperature);
         *max = (*max).max(temperature);
@@ -82,7 +87,7 @@ fn hash_stats(stats: &HashMap<ArrayType, Stat, MHasher>) {
 }
 
 /// outputs the results
-fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
+fn mprint(stats: &HMap) {
     let mut all: Vec<(&[u8], &Stat)> = stats.iter().map(|(x, v)| (mas_slice(x), v)).collect();
     all.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
@@ -105,4 +110,17 @@ fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
 /// To be able to more easly swap the array type
 fn mas_slice(x: &ArrayType) -> &[u8] {
     x
+}
+
+// type HMap = HashMap<ArrayType, Stat, MHasher>;
+type HMap = StackMap<ArrayType, Stat, MHasher>;
+
+fn init_map() -> HMap {
+    // HashMap::with_capacity_and_hasher(10000, MHasher::default())
+    HMap::new()
+}
+
+fn insert_or_default<'a>(stats: &'a mut HMap, station: &[u8]) -> &'a mut Stat {
+    // stats.entry(station.into()).or_default()
+    stats.insert(station.into(), Default::default())
 }
