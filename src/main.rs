@@ -104,8 +104,8 @@ impl Hasher for FashHaserSimd {
 }
 
 // type MHasher = rustc_hash::FxBuildHasher;
-// type MHasher = FasHaserBuilder;
-type MHasher = FasHaserBuilderSimd;
+type MHasher = FasHaserBuilder;
+// type MHasher = FasHaserBuilderSimd;
 
 fn main() {
     let f = File::open("measurements.txt").unwrap();
@@ -171,7 +171,7 @@ fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
         let (station, stat) = last;
         // safe
         let station = unsafe { ::std::str::from_utf8_unchecked(station) };
-        println!("{station}:={stat}}}")
+        println!("{station}={stat}}}")
     }
 }
 
