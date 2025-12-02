@@ -1,5 +1,5 @@
 {
-  description = "1 Billion Row Challenge (1BRC)";
+  description = "1 Billion Row Challenge (1BRC) Generator";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -54,7 +54,7 @@
           buildPhase = ''
             mkdir -p classes
 
-            # Compile the specific generator class. 
+            # Compile the specific generator class.
             # We include the sourcepath to handle package resolution if needed.
             javac -d classes \
                   -sourcepath src/main/java \
@@ -70,6 +70,32 @@
           '';
         };
 
+        # 1.5 The Solution Derivation: Compiles the baseline Java solution
+        solutionJar = pkgs.stdenv.mkDerivation {
+          pname = "1brc-solution-baseline";
+          version = "1.0.0";
+
+          src = onebrc;
+
+          nativeBuildInputs = [ pkgs.jdk21_headless ];
+
+          buildPhase = ''
+            mkdir -p classes
+
+            # Compile the baseline solution
+            javac -d classes \
+                  -sourcepath src/main/java \
+                  src/main/java/dev/morling/onebrc/CalculateAverage_baseline.java
+
+            jar cf solution.jar -C classes .
+          '';
+
+          installPhase = ''
+            mkdir -p $out/share/java
+            cp solution.jar $out/share/java/
+          '';
+        };
+
         # 2. The Script: Wraps the JAR execution
         generateScript = pkgs.writeShellScriptBin "generate-measurements" ''
           set -e
@@ -81,18 +107,40 @@
             -cp ${generatorJar}/share/java/generator.jar \
             dev.morling.onebrc.CreateMeasurements \
             "$ROWS"
-            
+
           echo "Done. File created at ./measurements.txt"
+        '';
+
+        # 3. The Solution Script
+        solutionScript = pkgs.writeShellScriptBin "run-solution" ''
+          set -e
+
+          # The baseline implementation expects measurements.txt in the CWD
+          if [ ! -f "./measurements.txt" ]; then
+            echo "Error: ./measurements.txt not found."
+            echo "Please run 'nix run' first to generate the data."
+            exit 1
+          fi
+
+          echo "Running Java Baseline Solution..."
+          ${pkgs.jdk21_headless}/bin/java \
+            -cp ${solutionJar}/share/java/solution.jar \
+            dev.morling.onebrc.CalculateAverage_baseline
         '';
 
       in
       {
         # Expose the package
         packages.default = generateScript;
+        packages.solution = solutionScript;
 
         # Expose as a runnable app
         apps.default = flake-utils.lib.mkApp {
           drv = generateScript;
+        };
+
+        apps.solution = flake-utils.lib.mkApp {
+          drv = solutionScript;
         };
 
         formatter = treefmtEval.config.build.wrapper;
