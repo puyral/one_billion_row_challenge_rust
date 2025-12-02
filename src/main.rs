@@ -215,13 +215,29 @@ fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
 
 fn parse_value(str: &[u8]) -> fsize {
     let n = str.len();
-    let sign = str[0] == b'-';
-    let has_4th = (n == 5) | ((n == 4) & !sign);
-    let res = get_value(str, n - 1)
-        + 10 * get_value(str, n - 3)
-        + (has_4th as fsize) * 100 * get_value(str, n.saturating_sub(4));
+    // Assuming str is verified to be valid input, checking index 0 is safe
+    let sign = unsafe { *str.get_unchecked(0) } == b'-';
 
-    res - 2 * (sign as fsize) * res
+    // let has_4th = (n == 5) | ((n == 4) & !sign);
+    let has_4th = ((n & 4) != 0) & (((n & 1) != 0) | !sign);
+
+
+    // We use & 0x0F instead of wrapping_sub(b'0')
+    unsafe {
+        let dec = (*str.get_unchecked(n - 1) & 0x0F) as fsize;
+        let unit = (*str.get_unchecked(n - 3) & 0x0F) as fsize;
+        
+        // Safety: If n=3, saturating_sub(4) = 0. We read str[0].
+        // This is safe (len is 3). The value is garbage for this calculation, 
+        // but 'has_4th' is 0, so it will be multiplied by zero and discarded.
+        let ten = (*str.get_unchecked(n.saturating_sub(4)) & 0x0F) as fsize;
+
+        let res = dec + 10 * unit + 100 * ten * (has_4th as fsize);
+
+        // Create a mask: 0000... if positive, 1111... (-1) if negative
+        let mask = -(sign as fsize); 
+        (res ^ mask) - mask
+    }
 }
 
 fn get_value(str: &[u8], idx: usize) -> fsize {
