@@ -178,7 +178,7 @@ fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
 fn parse_value(str: &[u8]) -> fsize {
     let n = str.len();
     let sign = str[0] == b'-';
-    let has_4th = !sign && (n >= 4);
+    let has_4th = (n == 5) | ((n == 4) & !sign);
     let res = get_value(str[n - 1])
         + 10 * get_value(str[n - 3])
         + (has_4th as fsize) * 100 * get_value(str[n.saturating_sub(4)]);
