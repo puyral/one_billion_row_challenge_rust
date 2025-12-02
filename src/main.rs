@@ -34,7 +34,7 @@ mod hashmap;
 type fsize = i16;
 
 // type ArrayType = SmallVec<[u8; 16]>;
-type ArrayType = Vec<u8>;
+type ArrayType = Box<[u8]>;
 
 static FILE: &str = match option_env!("FILE") {
     Some(x) => x,
@@ -42,6 +42,7 @@ static FILE: &str = match option_env!("FILE") {
 };
 
 fn main() {
+    println!("memory usage: {}", ::std::mem::size_of::<HMap>());
     let f = File::open(FILE).unwrap();
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
@@ -67,7 +68,7 @@ fn main() {
 
     mprint(&stats);
 
-    HashStat::hash_stats(&stats);
+    // HashStat::hash_stats(&stats);
 }
 
 /// outputs the results

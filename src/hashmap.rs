@@ -9,6 +9,7 @@ use crate::HashStat;
 
 static MAP_SIZE: usize = 1 << (10_000usize.highest_one().unwrap() + 1);
 static MASK: usize = MAP_SIZE - 1;
+// static MAP_SIZE: usize = 10_000;
 
 static BUCKET_SIZE: usize = 1;
 
@@ -112,6 +113,11 @@ where
     K: Hash + Ord,
     H: BuildHasher,
 {
+    const fn get_idx(hashed: u64) -> usize {
+        // hashed as usize % MAP_SIZE
+        hashed as usize & MASK
+    }
+
     pub fn insert(&mut self, key: K, value: V) -> &mut V {
         assert!(self.size < MAP_SIZE, "no space left");
 
@@ -123,7 +129,7 @@ where
             value,
         };
 
-        let mut idx = hashed as usize & MASK;
+        let mut idx = Self::get_idx(hashed);
 
         while let Bucket(Some(bucket)) = &mut self.content[idx] {
             match new_bucket.cmp(bucket) {
@@ -157,7 +163,7 @@ where
     {
         let hashed = self.hasher.hash_one(key);
 
-        let mut idx = hashed as usize & MASK;
+        let mut idx = Self::get_idx(hashed);
         let idx = loop {
             match &self.content[idx] {
                 Bucket(None) => return None,
@@ -206,7 +212,7 @@ where
 
         for k in stats.keys() {
             let c: &mut usize = ret
-                .entry(H::default().hash_one(k) as usize & MASK)
+                .entry(Self::get_idx(H::default().hash_one(k)))
                 .or_default();
             *c += 1usize;
         }
