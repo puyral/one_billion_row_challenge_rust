@@ -54,7 +54,7 @@ let
       fi
 
       echo "Running Java Baseline Solution..."
-      ${graalvm}/bin/java --enable-preview --release 25 \
+      ${graalvm}/bin/java \
         -cp ${jar}/share/java/${name}.jar \
         ${java_path}
         # dev.morling.onebrc.CalculateAverage_baseline
