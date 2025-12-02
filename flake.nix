@@ -74,7 +74,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = [
             packages.generateScript
-            pkgs.jdk21_headless
+            pkgs.graalvmPackages.graalvm-ce
             pkgs.nixd
             rust
           ]

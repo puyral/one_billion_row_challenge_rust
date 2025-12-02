@@ -1,12 +1,13 @@
 {
   onebrc,
-  jdk21_headless,
   writeShellScriptBin,
   stdenv,
+  pkgs, # Add pkgs here
   ...
 }:
 let
   mkDerivation = stdenv.mkDerivation;
+  graalvm = pkgs.graalvmPackages.graalvm-ce; # Define graalvm here
   mkJar =
     name: path:
     mkDerivation {
@@ -15,20 +16,20 @@ let
 
       src = onebrc;
 
-      nativeBuildInputs = [ jdk21_headless ];
+      nativeBuildInputs = [ graalvm ]; # Use graalvm here
 
       buildPhase = ''
         mkdir -p classes
 
         # Compile the specific generator class.
         # We include the sourcepath to handle package resolution if needed.
-        javac -d classes \
+        ${graalvm}/bin/javac --enable-preview --release 25 -d classes \
               -sourcepath src/main/java \
               ${path}
               # src/main/java/dev/morling/onebrc/CreateMeasurements.java
 
         # Create the JAR
-        jar cf ${name}.jar -C classes .
+        ${graalvm}/bin/jar cf ${name}.jar -C classes .
       '';
 
       installPhase = ''
@@ -53,7 +54,7 @@ let
       fi
 
       echo "Running Java Baseline Solution..."
-      ${jdk21_headless}/bin/java \
+      ${graalvm}/bin/java --enable-preview --release 25 \
         -cp ${jar}/share/java/${name}.jar \
         ${java_path}
         # dev.morling.onebrc.CalculateAverage_baseline
@@ -70,7 +71,7 @@ in
 
       echo "Generating $ROWS rows using the Nix-built generator..."
 
-      ${jdk21_headless}/bin/java \
+      ${graalvm}/bin/java --enable-preview --release 25 \
         -cp ${generatorJar}/share/java/generator.jar \
         dev.morling.onebrc.CreateMeasurements \
         "$ROWS"
