@@ -31,8 +31,13 @@ type fsize = i16;
 // type ArrayType = SmallVec<[u8; 16]>;
 type ArrayType = Vec<u8>;
 
+static FILE: &str = match option_env!("FILE") {
+    Some(x) => x,
+    None => "measurements.txt",
+};
+
 fn main() {
-    let f = File::open("measurements.txt").unwrap();
+    let f = File::open(FILE).unwrap();
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
 
@@ -60,6 +65,7 @@ fn main() {
     // hash_stats(&stats);
 }
 
+/// prints stats about the hash
 fn hash_stats(stats: &HashMap<ArrayType, Stat, MHasher>) {
     println!();
     let mut ret = HashMap::new();
@@ -75,6 +81,7 @@ fn hash_stats(stats: &HashMap<ArrayType, Stat, MHasher>) {
     println!("max: {max}, mean: {mean}")
 }
 
+/// outputs the results
 fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
     let mut all: Vec<(&[u8], &Stat)> = stats.iter().map(|(x, v)| (mas_slice(x), v)).collect();
     all.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
@@ -95,7 +102,7 @@ fn mprint(stats: &HashMap<ArrayType, Stat, MHasher>) {
     }
 }
 
-
+/// To be able to more easly swap the array type
 fn mas_slice(x: &ArrayType) -> &[u8] {
     x
 }
