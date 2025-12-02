@@ -154,6 +154,7 @@ fn split_u64_unsafe(value: u64) -> [u8x4; 2] {
     }
 }
 
-// pub type MHasher = rustc_hash::FxBuildHasher;
-pub type MHasher = FasHaserBuilder;
+/// I give up, my hashes have too many colisions
+pub type MHasher = rustc_hash::FxBuildHasher;
+// pub type MHasher = FasHaserBuilder;
 // pub type MHasher = FasHaserBuilderSimd;
