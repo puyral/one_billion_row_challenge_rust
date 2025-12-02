@@ -59,7 +59,13 @@
         # apps.friend = flake-utils.lib.mkApp { drv = friendScript; };
 
         apps = builtins.mapAttrs (n: drv: flake-utils.lib.mkApp { inherit drv; }) (
-          with packages; { inherit solutionScript friendScript generateScript; }
+          with packages;
+          {
+            solution = solutionScript;
+            friend = friendScript;
+            default = generateScript;
+            fastest_java = fastestJava;
+          }
         );
 
         formatter = treefmtEval.config.build.wrapper;
