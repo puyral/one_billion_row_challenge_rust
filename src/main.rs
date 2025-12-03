@@ -52,7 +52,7 @@ fn main() {
         .map(|x| x.parse().unwrap())
         .unwrap_or(num_cpus::get());
 
-    let chunk_size = f.len() / (n_cpus + 1);
+    let chunk_size = f.len() / (n_cpus);
     println!("memory usage: {}", ::std::mem::size_of::<HMap>() * n_cpus);
 
     let (results, mut stations_vec): (Vec<_>, Vec<_>) = thread::scope(|sc| {
@@ -67,7 +67,7 @@ fn main() {
                     )) // Set to 32MB (adjust as needed)
                     .spawn_scoped(sc, {
                         let f = &f;
-                        move || process(f, i, chunk_size)
+                        move || process(f, i, chunk_size, i +1== n_cpus)
                     })
                     .expect("failed to spawn thread") // Builder returns a Result
             })
@@ -91,12 +91,19 @@ fn main() {
     mprint(&results, &stations);
 }
 
-fn process(f: &[u8], n: usize, chunk_size: usize) -> (HMap, FxHashSet<ArrayType>) {
-    let end = f.len().min((n + 1) * chunk_size);
-    let start = refine_start(f, n * chunk_size);
-    let mut stats = init_map();
-    let iter = Finder::new(&f[start..], end - start);
+fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSet<ArrayType>) {
+    let iter = {
+        let start = refine_start(f, n * chunk_size);
+        let f = &f[start..];
+        let size = if last {
+            f.len()
+        } else {
+            chunk_size - (n * chunk_size - start)
+        };
+        Finder::new(f, size)
+    };
 
+    let mut stats = init_map();
     for (station, temperature) in iter {
         let Stat {
             min,
