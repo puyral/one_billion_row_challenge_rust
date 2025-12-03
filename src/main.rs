@@ -54,8 +54,11 @@ fn main() {
 
     let chunk_size = f.len() / (n_cpus);
     let data_size = ::std::mem::size_of::<HMap>();
-    let stack_size = 2 * ::std::mem::size_of::<HMap>() + 2*1024*1024;
-    println!("running on {n_cpus} threads; allocating stacks of size {stack_size}; total {}", stack_size * n_cpus);
+    let stack_size = 2 * ::std::mem::size_of::<HMap>() + 2 * 1024 * 1024;
+    println!(
+        "running on {n_cpus} threads; allocating stacks of size {stack_size}; total {}",
+        stack_size * n_cpus
+    );
 
     let (results, mut stations_vec): (Vec<_>, Vec<_>) = thread::scope(|sc| {
         let handles: Vec<_> = (0..n_cpus)
