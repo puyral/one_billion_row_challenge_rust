@@ -1,6 +1,7 @@
 #![feature(portable_simd)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(int_lowest_highest_one)]
+#![feature(maybe_uninit_uninit_array_transpose)]
 #![allow(unused)]
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -8,6 +9,7 @@ use std::{
     fs::{self, File},
     hash::{BuildHasher, Hash, Hasher},
     io::{BufRead, BufReader},
+    mem::MaybeUninit,
     simd::{prelude::SimdPartialEq, u8x4, u8x8, u8x16, u8x32, u8x64},
     str::Chars,
     thread,
@@ -42,37 +44,74 @@ static FILE: &str = match option_env!("FILE") {
     None => "measurements.txt",
 };
 
+static NUM_CPUS: usize = match option_env!("NUM_CPUS") {
+    Some(x) => parse_usize(x),
+    None => 24,
+};
+
+const fn parse_usize(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut num = 0;
+    while i < bytes.len() {
+        // ASCII '0' is 48
+        num = num * 10 + (bytes[i] - 48) as usize;
+        i += 1;
+    }
+    num
+}
+
 fn main() {
+    let data_size = ::std::mem::size_of::<[HMap; NUM_CPUS]>();
+    let stack_size = 10 * data_size;
+    println!("running on {NUM_CPUS} threads; allocating: {}", data_size);
+
+    std::thread::Builder::new()
+        .name("main_worker".to_string()) // Optional: helps with debugging
+        .stack_size(stack_size)
+        .spawn(main_large_stack)
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+fn main_large_stack() {
     let f = File::open(FILE).unwrap();
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
 
-    // set the NUM_CPU env variable at compile time to change the number of cpu used. Defaults choosing the max at runtime
-    let n_cpus = option_env!("NUM_CPU")
-        .map(|x| x.parse().unwrap())
-        .unwrap_or(num_cpus::get());
+    let chunk_size = f.len() / NUM_CPUS;
+    let mut stats = allocate_stats();
 
-    let chunk_size = f.len() / (n_cpus);
-    println!("memory usage: {}", ::std::mem::size_of::<HMap>() * n_cpus);
-
-    let (results, mut stations_vec): (Vec<_>, Vec<_>) = thread::scope(|sc| {
-        let handles: Vec<_> = (0..n_cpus)
-            .map(|i| {
+    let mut stations_vec: Vec<_> = thread::scope(|sc| {
+        // let handles: Vec<_> = (0..n_cpus)
+        //     .map(|i| {
+        //     })
+        //     .collect::<Vec<_>>();
+        let handles: Vec<_> = stats
+            .iter_mut()
+            .enumerate()
+            .map(|(i, stats)| {
                 // Create a builder with custom stack size
-                std::thread::Builder::new()
-                    .name(format!("worker-{}", i)) // Optional: helps with debugging
-                    .stack_size(usize::max(
-                        32 * 1024 * 1024,
-                        2 * ::std::mem::size_of::<HMap>(),
-                    )) // Set to 32MB (adjust as needed)
-                    .spawn_scoped(sc, {
+                // std::thread::Builder::new()
+                //     .name(format!("worker-{}", i)) // Optional: helps with debugging
+                //     .stack_size(usize::max(
+                //         32 * 1024 * 1024,
+                //         2 * ::std::mem::size_of::<HMap>(),
+                //     )) // Set to 32MB (adjust as needed)
+                //     .spawn_scoped(sc, {
+                //         let f = &f;
+                //         move || process(stats, f, i, chunk_size, i + 1 == NUM_CPUS)
+                //     })
+                //     .expect("failed to spawn thread") // Builder returns a Result
+                sc.spawn({
                         let f = &f;
-                        move || process(f, i, chunk_size, i + 1 == n_cpus)
-                    })
-                    .expect("failed to spawn thread") // Builder returns a Result
+                        move || process(stats, f, i, chunk_size, i + 1 == NUM_CPUS)
+
+                })
             })
-            .collect::<Vec<_>>();
-        handles.into_iter().map(|h| h.join().unwrap()).unzip()
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
     let mut stations = HashSet::with_capacity_and_hasher(
         stations_vec.iter().map(|x| x.len()).max().unwrap_or(1) * 2,
@@ -88,10 +127,20 @@ fn main() {
         }
     }
 
-    mprint(&results, &stations);
+    mprint(&stats, &stations);
 }
 
-fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSet<ArrayType>) {
+fn allocate_stats() -> [HMap; NUM_CPUS] {
+    ::std::array::from_fn(|_| init_map())
+}
+
+fn process(
+    stats: &mut HMap,
+    f: &[u8],
+    n: usize,
+    chunk_size: usize,
+    last: bool,
+) -> FxHashSet<ArrayType> {
     let iter = {
         let start = refine_start(f, n * chunk_size);
         let f = &f[start..];
@@ -103,7 +152,7 @@ fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSe
         Finder::new(f, size)
     };
 
-    let mut stats = init_map();
+    // let mut stats = init_map();
     for (station, temperature) in iter {
         let Stat {
             min,
@@ -112,7 +161,7 @@ fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSe
             count,
         } = match stats.get_mut(station) {
             Some(x) => x,
-            None => insert_or_default(&mut stats, station),
+            None => insert_or_default(stats, station),
         };
         *min = (*min).min(temperature);
         *max = (*max).max(temperature);
@@ -121,7 +170,7 @@ fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSe
     }
 
     let keys = stats.keys().cloned().collect();
-    (stats, keys)
+    keys
 }
 
 fn refine_start(f: &[u8], start: usize) -> usize {
@@ -133,7 +182,7 @@ fn refine_start(f: &[u8], start: usize) -> usize {
 }
 
 /// outputs the results
-fn mprint(stats: &[HMap], stations: &FxHashSet<ArrayType>) {
+fn mprint(stats: &[HMap; NUM_CPUS], stations: &FxHashSet<ArrayType>) {
     let mut all: Vec<_> = stations.iter().collect();
     all.sort_unstable();
 

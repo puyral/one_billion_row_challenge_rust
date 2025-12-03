@@ -15,14 +15,17 @@ static BUCKET_SIZE: usize = 1;
 
 // struct Bucket<T>(SmallVec<[T; BUCKET_SIZE]>);
 
+#[derive(Debug, Clone, Copy)]
 struct ContentBucket<K, V> {
     hash_mem: u64,
     key: K,
     value: V,
 }
 
+#[derive(Debug, Clone, Copy)]
 struct Bucket<K, V>(Option<ContentBucket<K, V>>);
 
+#[derive(Debug, Clone, Copy)]
 pub struct StackMap<K, V, H> {
     content: [Bucket<K, V>; MAP_SIZE],
     hasher: H,
