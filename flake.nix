@@ -74,7 +74,6 @@
         devShells.default = pkgs.mkShell {
           buildInputs = [
             packages.generateScript
-            packages.friendScript
             packages.fastestJava
             packages.solutionScript
             pkgs.graalvmPackages.graalvm-ce
@@ -88,6 +87,7 @@
             hyperfine
           ])
           ++ (with pkgs; lib.optional (!stdenv.isDarwin) perf)
+          ++ (with pkgs; lib.optional (!stdenv.isDarwin) packages.friendScript)
           ++ (with rustPlatform; [
             bindgenHook
             cargoCheckHook
