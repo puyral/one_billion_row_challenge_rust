@@ -5,14 +5,14 @@ use crate::fsize;
 pub struct Finder<'a> {
     data: &'a [u8],
     /// The size of what will be left in `data` once we are done
-    end_length: usize
+    end_length: usize,
 }
 
 impl<'a> Finder<'a> {
     pub fn new(data: &'a [u8], size: usize) -> Self {
         assert!(data.len() >= size, "len: {}, size: {size}", data.len());
-        let end_length  = data.len() - size;
-        Self { data , end_length}
+        let end_length = data.len() - size;
+        Self { data, end_length }
     }
 }
 

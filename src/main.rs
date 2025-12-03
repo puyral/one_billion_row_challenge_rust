@@ -67,7 +67,7 @@ fn main() {
                     )) // Set to 32MB (adjust as needed)
                     .spawn_scoped(sc, {
                         let f = &f;
-                        move || process(f, i, chunk_size, i +1== n_cpus)
+                        move || process(f, i, chunk_size, i + 1 == n_cpus)
                     })
                     .expect("failed to spawn thread") // Builder returns a Result
             })
