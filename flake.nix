@@ -74,6 +74,9 @@
         devShells.default = pkgs.mkShell {
           buildInputs = [
             packages.generateScript
+            packages.friendScript
+            packages.fastestJava
+            packages.solutionScript
             pkgs.graalvmPackages.graalvm-ce
             pkgs.nixd
             rust
@@ -82,6 +85,7 @@
             cargo-expand
             cargo-limit
             cargo-flamegraph
+            hyperfine
           ])
           ++ (with pkgs; lib.optional (!stdenv.isDarwin) perf)
           ++ (with rustPlatform; [
