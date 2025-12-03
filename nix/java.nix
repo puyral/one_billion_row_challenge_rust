@@ -1,6 +1,7 @@
 {
   onebrc,
   writeShellScriptBin,
+  jdk21_headless,
   stdenv,
   pkgs, # Add pkgs here
   ...
@@ -71,7 +72,7 @@ in
 
       echo "Generating $ROWS rows using the Nix-built generator..."
 
-      ${graalvm}/bin/java --enable-preview --release 25 \
+      ${jdk21_headless}/bin/java --enable-preview --release 25 \
         -cp ${generatorJar}/share/java/generator.jar \
         dev.morling.onebrc.CreateMeasurements \
         "$ROWS"
