@@ -53,7 +53,9 @@ fn main() {
         .unwrap_or(num_cpus::get());
 
     let chunk_size = f.len() / (n_cpus);
-    println!("memory usage: {}", ::std::mem::size_of::<HMap>() * n_cpus);
+    let data_size = ::std::mem::size_of::<HMap>();
+    let stack_size = 2 * ::std::mem::size_of::<HMap>() + 2*1024*1024;
+    println!("running on {n_cpus} threads; allocating stacks of size {stack_size}; total {}", stack_size * n_cpus);
 
     let (results, mut stations_vec): (Vec<_>, Vec<_>) = thread::scope(|sc| {
         let handles: Vec<_> = (0..n_cpus)
@@ -61,10 +63,7 @@ fn main() {
                 // Create a builder with custom stack size
                 std::thread::Builder::new()
                     .name(format!("worker-{}", i)) // Optional: helps with debugging
-                    .stack_size(usize::max(
-                        32 * 1024 * 1024,
-                        2 * ::std::mem::size_of::<HMap>(),
-                    )) // Set to 32MB (adjust as needed)
+                    .stack_size(stack_size) // Set to 32MB (adjust as needed)
                     .spawn_scoped(sc, {
                         let f = &f;
                         move || process(f, i, chunk_size, i + 1 == n_cpus)
