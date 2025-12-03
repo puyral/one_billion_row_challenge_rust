@@ -4,11 +4,15 @@ use crate::fsize;
 
 pub struct Finder<'a> {
     data: &'a [u8],
+    /// The size of what will be left in `data` once we are done
+    end_length: usize
 }
 
 impl<'a> Finder<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data }
+    pub fn new(data: &'a [u8], size: usize) -> Self {
+        assert!(data.len() >= size, "len: {}, size: {size}", data.len());
+        let end_length  = data.len() - size;
+        Self { data , end_length}
     }
 }
 
@@ -16,6 +20,9 @@ impl<'a> Iterator for Finder<'a> {
     type Item = (&'a [u8], i16);
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.data.len() < self.end_length {
+            return None;
+        }
         let (station_idx, temperature_idx) = find_next(self.data)?;
 
         let station = &self.data[0..station_idx];
@@ -122,7 +129,7 @@ mod test {
     fn iter_sound() {
         let values = "atr;-4.5\nrrr;78.0\nasdf;0.1\ndsaf;-0.0\n".as_bytes();
 
-        let finder = Finder::new(values);
+        let finder = Finder::new(values, 0);
 
         for (s, t) in finder {
             dbg!(str::from_utf8(s).unwrap());

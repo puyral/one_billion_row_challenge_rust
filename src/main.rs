@@ -10,11 +10,12 @@ use std::{
     io::{BufRead, BufReader},
     simd::{prelude::SimdPartialEq, u8x4, u8x8, u8x16, u8x32, u8x64},
     str::Chars,
+    thread,
 };
 
 use memchr::Memchr2;
 use memmap2::{Mmap, MmapOptions};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use smallvec::{SmallVec, ToSmallVec};
 
 mod hasher;
@@ -42,13 +43,59 @@ static FILE: &str = match option_env!("FILE") {
 };
 
 fn main() {
-    println!("memory usage: {}", ::std::mem::size_of::<HMap>());
     let f = File::open(FILE).unwrap();
     let f = unsafe { Mmap::map(&f).unwrap() };
     f.advise(memmap2::Advice::Sequential).unwrap();
 
+    // set the NUM_CPU env variable at compile time to change the number of cpu used. Defaults choosing the max at runtime
+    let n_cpus = option_env!("NUM_CPU")
+        .map(|x| x.parse().unwrap())
+        .unwrap_or(num_cpus::get());
+
+    let chunk_size = f.len() / (n_cpus + 1);
+    println!("memory usage: {}", ::std::mem::size_of::<HMap>() * n_cpus);
+
+    let (results, mut stations_vec): (Vec<_>, Vec<_>) = thread::scope(|sc| {
+        let handles: Vec<_> = (0..n_cpus)
+            .map(|i| {
+                // Create a builder with custom stack size
+                std::thread::Builder::new()
+                    .name(format!("worker-{}", i)) // Optional: helps with debugging
+                    .stack_size(usize::max(
+                        32 * 1024 * 1024,
+                        2 * ::std::mem::size_of::<HMap>(),
+                    )) // Set to 32MB (adjust as needed)
+                    .spawn_scoped(sc, {
+                        let f = &f;
+                        move || process(f, i, chunk_size)
+                    })
+                    .expect("failed to spawn thread") // Builder returns a Result
+            })
+            .collect::<Vec<_>>();
+        handles.into_iter().map(|h| h.join().unwrap()).unzip()
+    });
+    let mut stations = HashSet::with_capacity_and_hasher(
+        stations_vec.iter().map(|x| x.len()).max().unwrap_or(1) * 2,
+        FxBuildHasher,
+    );
+
+    while let Some(s) = stations_vec.pop() {
+        for station in s {
+            for other in &mut stations_vec {
+                other.remove(&station);
+            }
+            stations.insert(station);
+        }
+    }
+
+    mprint(&results, &stations);
+}
+
+fn process(f: &[u8], n: usize, chunk_size: usize) -> (HMap, FxHashSet<ArrayType>) {
+    let end = f.len().min((n + 1) * chunk_size);
+    let start = refine_start(f, n * chunk_size);
     let mut stats = init_map();
-    let iter = Finder::new(&f);
+    let iter = Finder::new(&f[start..], end - start);
 
     for (station, temperature) in iter {
         let Stat {
@@ -66,26 +113,43 @@ fn main() {
         *count += 1;
     }
 
-    mprint(&stats);
+    let keys = stats.keys().cloned().collect();
+    (stats, keys)
+}
 
-    // HashStat::hash_stats(&stats);
+fn refine_start(f: &[u8], start: usize) -> usize {
+    if start == 0 || f[start - 1] == b'\n' {
+        start
+    } else {
+        start + memchr::memchr(b'\n', &f[start..]).unwrap() + 1
+    }
 }
 
 /// outputs the results
-fn mprint(stats: &HMap) {
-    let mut all: Vec<(&[u8], &Stat)> = stats.iter().map(|(x, v)| (mas_slice(x), v)).collect();
-    all.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
+fn mprint(stats: &[HMap], stations: &FxHashSet<ArrayType>) {
+    let mut all: Vec<_> = stations.iter().collect();
+    all.sort_unstable();
+
+    let f = |s| {
+        (
+            mas_slice(s),
+            Stat::reduce(stats.iter().map(|m| m.get(s).copied().unwrap_or_default()))
+                .unwrap_or_default(),
+        )
+    };
+
+    let last = all.pop().unwrap();
+    let all = all.into_iter().map(&f).peekable();
 
     print!("{{");
 
-    let last = all.pop().unwrap();
     for (station, stat) in all {
         // safe
         let station = unsafe { ::std::str::from_utf8_unchecked(station) };
         print!("{station}={stat}, ")
     }
     {
-        let (station, stat) = last;
+        let (station, stat) = f(last);
         // safe
         let station = unsafe { ::std::str::from_utf8_unchecked(station) };
         println!("{station}={stat}}}")

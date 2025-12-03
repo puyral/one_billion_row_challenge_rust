@@ -180,6 +180,28 @@ where
             unsafe { self.content[idx].0.as_mut().unwrap_unchecked() };
         Some(value)
     }
+
+    pub fn get<'a, Q>(&'a self, key: &Q) -> Option<&'a V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized,
+        Q: Hash + Eq,
+    {
+        let hashed = self.hasher.hash_one(key);
+
+        let mut idx = Self::get_idx(hashed);
+        loop {
+            match &self.content[idx] {
+                Bucket(None) => return None,
+                Bucket(Some(ContentBucket {
+                    hash_mem,
+                    key: ckey,
+                    value,
+                })) if *hash_mem == hashed && ckey.borrow() == key => return Some(value),
+                _ => idx = (idx + 1) % MAP_SIZE,
+            }
+        }
+    }
 }
 
 impl<K, V> ContentBucket<K, V> {

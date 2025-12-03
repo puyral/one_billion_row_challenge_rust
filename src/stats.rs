@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use crate::fsize;
 
+#[derive(Clone, Copy)]
 pub struct Stat {
     pub min: fsize,
     pub max: fsize,
@@ -33,5 +34,16 @@ impl Display for Stat {
         let max = (max as f64) / 10.;
         // safe
         write!(f, "{min:.1}/{mean:.1}/{max:.1}")
+    }
+}
+
+impl Stat {
+    pub fn reduce(iter: impl IntoIterator<Item = Self>) -> Option<Self> {
+        iter.into_iter().reduce(|a, b| Self {
+            min: a.min.min(b.min),
+            max: a.max.max(b.max),
+            sum: a.sum + b.sum,
+            count: a.count + b.count,
+        })
     }
 }
