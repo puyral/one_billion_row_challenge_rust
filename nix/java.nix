@@ -90,7 +90,7 @@ let
   };
 in
 {
-   # 2. The Script: Wraps the JAR execution
+  # 2. The Script: Wraps the JAR execution
   generateScript = writeShellScriptBin "generate-measurements" ''
     set -e
     ROWS="''${1:-1000000000}" # Default to 1 billion if no arg provided
