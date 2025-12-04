@@ -5,6 +5,7 @@
 #![allow(unused)]
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
+    env,
     fmt::Display,
     fs::{self, File},
     hash::{BuildHasher, Hash, Hasher},
@@ -49,9 +50,13 @@ fn main() {
     f.advise(memmap2::Advice::Sequential).unwrap();
 
     // set the NUM_CPU env variable at compile time to change the number of cpu used. Defaults choosing the max at runtime
-    let n_cpus = option_env!("NUM_CPU")
-        .map(|x| x.parse().unwrap())
+    let n_cpus = env::vars()
+        .find(|x| x.0 == "NUM_CPU")
+        .map(|x| x.1.parse().unwrap())
         .unwrap_or(num_cpus::get());
+    // let n_cpus = option_env!("NUM_CPU")
+    //     .map(|x| x.parse().unwrap())
+    //     .unwrap_or(num_cpus::get());
 
     let chunk_size = f.len() / (n_cpus);
     let data_size = ::std::mem::size_of::<HMap>();
@@ -99,9 +104,9 @@ fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSe
         let start = refine_start(f, n * chunk_size);
         // let f = &f[start..];
         let end = if last {
-            f.len()-1
+            f.len() - 1
         } else {
-            (n+1)*chunk_size
+            (n + 1) * chunk_size
             // chunk_size - (n * chunk_size - start)
         };
         Finder::new(f, start, end)

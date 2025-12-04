@@ -4,7 +4,7 @@ use std::{
     simd::{
         Mask, Simd, i16x4,
         prelude::{SimdInt, SimdPartialEq, SimdUint},
-        u8x4, u8x8, u8x16, u8x32, u16x4, u64x4, usizex4,
+        u8x4, u8x8, u8x16, u8x32, u8x64, u16x4, u64x4, usizex4,
     },
     usize,
 };
@@ -52,8 +52,17 @@ impl<'a> Iterator for Finder<'a> {
 }
 
 #[allow(nonstandard_style)]
-type u8xx = u8x32;
-static NUMER_SKIPPED: usize = u8xx::LEN;
+type u8xx = u8x16;
+#[allow(nonstandard_style)]
+type ssize = u32;
+
+static SWAR_STATION: bool = true;
+
+static MIN_LEN: usize = if SWAR_STATION {
+    MIN_SWAR_LEN
+} else {
+    MIN_SIMD_LEN
+};
 
 /// repeats `e` for the while number
 macro_rules! mk_splat {
@@ -62,31 +71,28 @@ macro_rules! mk_splat {
     };
 }
 
-static SWAR_STATION: bool = false;
-
-#[inline(never)]
+// #[inline(never)]
 fn find_next(data: &[u8]) -> Option<(usize, usize)> {
-    if SWAR_STATION {
-        // deactivated
-        match sawr_station_search(data) {
-            Some(idsc) => Some((idsc, find_temperature(data, idsc))),
-            None if data.len() > NUMER_SKIPPED => slow_search(data, NUMER_SKIPPED),
-            _ => None,
-        }
+    if data.len() < MIN_LEN {
+        // rare slow path
+        let idsc = data.iter().position(|x| *x == b';')?;
+        Some((idsc, find_temperature(data, idsc)))
+    } else if SWAR_STATION {
+        let idsc = sawr_station_search(data);
+        Some((idsc, find_temperature(data, idsc)))
+
+        // match sawr_station_search(data) {
+        //     Some(idsc) => Some((idsc, find_temperature(data, idsc))),
+        //     None if data.len() > SWAR_LEN => slow_search(data, SWAR_LEN),
+        //     _ => None,
+        // }
     } else {
-        #[allow(clippy::collapsible_else_if)]
-        if data.len() < MIN_SIMD_LEN {
-            // rare slow path
-            let idsc = data.iter().position(|x| *x == b';')?;
-            Some((idsc, find_temperature(data, idsc)))
-        } else {
-            simd_search(data)
-        }
+        Some(simd_search(data))
     }
 }
 
-static MIN_SIMD_LEN: usize = 100_usize.div_ceil(u8xx::LEN) * u8xx::LEN;
-fn simd_search(data: &[u8]) -> Option<(usize, usize)> {
+static MIN_SIMD_LEN: usize = (100_usize / u8xx::LEN) * u8xx::LEN;
+fn simd_search(data: &[u8]) -> (usize, usize) {
     assert!(data.len() >= MIN_SIMD_LEN);
     let upper = MIN_SIMD_LEN / u8xx::LEN;
     let delimiter_nl = u8xx::splat(b'\n');
@@ -103,15 +109,24 @@ fn simd_search(data: &[u8]) -> Option<(usize, usize)> {
         let nl = delimiter_nl.simd_eq(line).first_set();
 
         match (sc, nl) {
-            (Some(idsc), Some(idnl)) => return Some((offset + idsc, offset + idnl)),
+            (Some(idsc), Some(idnl)) => return (offset + idsc, offset + idnl),
             (Some(idsc), None) => {
-                return Some((idsc, find_temperature(data, offset + idsc)));
+                return (idsc, find_temperature(data, offset + idsc));
             }
             (None, None) => continue,
             _ => unsafe { unreachable_unchecked() },
         }
     }
-    None
+    // remaining 4
+    for i in MIN_SIMD_LEN..data.len().min(100) {
+        if data[i] != b';' {
+            continue;
+        }
+        let idsc = MIN_SIMD_LEN + i;
+        return (idsc, find_temperature(data, idsc));
+    }
+    // Safety: names are less that 100 caracters
+    unsafe { unreachable_unchecked() }
 }
 
 fn slow_search(data: &[u8], skipped: usize) -> Option<(usize, usize)> {
@@ -120,6 +135,7 @@ fn slow_search(data: &[u8], skipped: usize) -> Option<(usize, usize)> {
     Some((idsc, idnl))
 }
 
+#[inline(always)]
 fn find_temperature(data: &[u8], offset: usize) -> usize {
     let offset = offset + 1;
     let data = &data[offset..];
@@ -142,29 +158,40 @@ fn find_temperature(data: &[u8], offset: usize) -> usize {
     res + offset
 }
 
-fn sawr_station_search(data: &[u8]) -> Option<usize> {
-    assert_eq!(NUMER_SKIPPED, ::std::mem::size_of::<u128>());
-    if data.len() < NUMER_SKIPPED {
-        // slow final path
-        return data.iter().position(|x| *x == b';');
+static SWAR_LEN: usize = ::std::mem::size_of::<ssize>();
+static MIN_SWAR_LEN: usize = (100_usize / SWAR_LEN) * SWAR_LEN;
+
+fn sawr_station_search(data: &[u8]) -> usize {
+    assert!(data.len() >= SWAR_LEN);
+    let upper = MIN_SIMD_LEN / SWAR_LEN;
+
+    for i in 0..upper {
+        let offset = i * SWAR_LEN;
+
+        let chunk = unsafe { (data.as_ptr().add(offset) as *const ssize).read_unaligned() };
+        let pattern = mk_splat!(ssize; b';');
+        let xored = chunk ^ pattern;
+
+        // (v - 0x01) & !v & 0x80 detects zero bytes.
+        let low_magic = mk_splat!(ssize; 0x01);
+        let high_magic = mk_splat!(ssize; 0x80);
+
+        // This results in 0x80 in the byte slot where \n was, and 0x00 elsewhere.
+        let mask = (xored.wrapping_sub(low_magic)) & !xored & high_magic;
+
+        if mask != 0 {
+            return (mask.trailing_zeros() / 8) as usize + offset
+        }
     }
-
-    let chunk = unsafe { (data.as_ptr() as *const u128).read_unaligned() };
-    let pattern = mk_splat!(u128; b';');
-    let xored = chunk ^ pattern;
-
-    // (v - 0x01) & !v & 0x80 detects zero bytes.
-    let low_magic = mk_splat!(u128; 0x01);
-    let high_magic = mk_splat!(u128; 0x80);
-
-    // This results in 0x80 in the byte slot where \n was, and 0x00 elsewhere.
-    let mask = (xored.wrapping_sub(low_magic)) & !xored & high_magic;
-
-    if mask == 0 {
-        None
-    } else {
-        Some((mask.trailing_zeros() / 8) as usize)
+    // remaining 4
+    for i in MIN_SIMD_LEN..data.len().min(100) {
+        if data[i] != b';' {
+            continue;
+        }
+        return MIN_SIMD_LEN + i;
     }
+    // Safety: names are less that 100 caracters
+    unsafe { unreachable_unchecked() }
 }
 
 fn compute_shape(str: &[u8], start: usize, end: usize) -> (bool, bool) {
