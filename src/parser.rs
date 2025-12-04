@@ -1,6 +1,5 @@
 use std::{
     hint::unreachable_unchecked,
-    os::unix::raw::off_t,
     simd::{
         Mask, Simd, i16x4,
         prelude::{SimdInt, SimdPartialEq, SimdUint},
@@ -54,7 +53,7 @@ impl<'a> Iterator for Finder<'a> {
 #[allow(nonstandard_style)]
 type u8xx = u8x16;
 #[allow(nonstandard_style)]
-type ssize = u32;
+type ssize = u128;
 
 static SWAR_STATION: bool = true;
 
@@ -71,7 +70,7 @@ macro_rules! mk_splat {
     };
 }
 
-// #[inline(never)]
+#[inline(never)]
 fn find_next(data: &[u8]) -> Option<(usize, usize)> {
     if data.len() < MIN_LEN {
         // rare slow path
@@ -80,12 +79,6 @@ fn find_next(data: &[u8]) -> Option<(usize, usize)> {
     } else if SWAR_STATION {
         let idsc = sawr_station_search(data);
         Some((idsc, find_temperature(data, idsc)))
-
-        // match sawr_station_search(data) {
-        //     Some(idsc) => Some((idsc, find_temperature(data, idsc))),
-        //     None if data.len() > SWAR_LEN => slow_search(data, SWAR_LEN),
-        //     _ => None,
-        // }
     } else {
         Some(simd_search(data))
     }
@@ -166,32 +159,31 @@ fn sawr_station_search(data: &[u8]) -> usize {
     let upper = MIN_SIMD_LEN / SWAR_LEN;
 
     for i in 0..upper {
-        let offset = i * SWAR_LEN;
-
-        let chunk = unsafe { (data.as_ptr().add(offset) as *const ssize).read_unaligned() };
-        let pattern = mk_splat!(ssize; b';');
-        let xored = chunk ^ pattern;
-
-        // (v - 0x01) & !v & 0x80 detects zero bytes.
-        let low_magic = mk_splat!(ssize; 0x01);
-        let high_magic = mk_splat!(ssize; 0x80);
-
-        // This results in 0x80 in the byte slot where \n was, and 0x00 elsewhere.
-        let mask = (xored.wrapping_sub(low_magic)) & !xored & high_magic;
-
-        if mask != 0 {
-            return (mask.trailing_zeros() / 8) as usize + offset
+        if let Some(value) = swar_inner(data, i * SWAR_LEN) {
+            return value;
         }
     }
-    // remaining 4
-    for i in MIN_SIMD_LEN..data.len().min(100) {
-        if data[i] != b';' {
-            continue;
-        }
-        return MIN_SIMD_LEN + i;
-    }
+
+    let tail = swar_inner(data, data.len().min(100) - SWAR_LEN);
     // Safety: names are less that 100 caracters
-    unsafe { unreachable_unchecked() }
+    unsafe { tail.unwrap_unchecked() }
+}
+
+#[inline(always)]
+fn swar_inner(data: &[u8], offset: usize) -> Option<usize> {
+    static PATTERN: ssize = mk_splat!(ssize; b';');
+    static LOW_MAGIC: ssize = mk_splat!(ssize; 0x01);
+    static HIGH_MAGIC: ssize = mk_splat!(ssize; 0x80);
+
+    let chunk = unsafe { (data.as_ptr().add(offset) as *const ssize).read_unaligned() };
+    let xored = chunk ^ PATTERN;
+    let mask = (xored.wrapping_sub(LOW_MAGIC)) & !xored & HIGH_MAGIC;
+
+    if mask != 0 {
+        Some((mask.trailing_zeros() / 8) as usize + offset)
+    } else {
+        None
+    }
 }
 
 fn compute_shape(str: &[u8], start: usize, end: usize) -> (bool, bool) {
