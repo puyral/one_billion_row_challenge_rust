@@ -3,6 +3,7 @@
 #![feature(int_lowest_highest_one)]
 #![feature(ascii_char)]
 #![allow(unused)]
+#![allow(nonstandard_style)]
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     env,

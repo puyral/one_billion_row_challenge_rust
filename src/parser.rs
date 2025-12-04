@@ -55,7 +55,7 @@ type u8xx = u8x16;
 #[allow(nonstandard_style)]
 type ssize = u128;
 
-static SWAR_STATION: bool = false;
+static SWAR_STATION: bool = true;
 
 static MIN_LEN: usize = if SWAR_STATION {
     MIN_SWAR_LEN
@@ -75,10 +75,10 @@ fn find_next(data: &[u8]) -> Option<(usize, usize)> {
     if data.len() < MIN_LEN {
         // rare slow path
         let idsc = data.iter().position(|x| *x == b';')?;
-        Some((idsc, find_temperature(data, idsc)))
+        Some((idsc, find_temperature_swar(data, idsc)))
     } else if SWAR_STATION {
         let idsc = sawr_station_search(data);
-        Some((idsc, find_temperature(data, idsc)))
+        Some((idsc, find_temperature_swar(data, idsc)))
     } else {
         Some(simd_search(data))
     }
@@ -104,7 +104,7 @@ fn simd_search(data: &[u8]) -> (usize, usize) {
         match (sc, nl) {
             (Some(idsc), Some(idnl)) => return (offset + idsc, offset + idnl),
             (Some(idsc), None) => {
-                return (idsc, find_temperature(data, offset + idsc));
+                return (idsc, find_temperature_swar(data, offset + idsc));
             }
             (None, None) => continue,
             _ => unsafe { unreachable_unchecked() },
@@ -116,7 +116,7 @@ fn simd_search(data: &[u8]) -> (usize, usize) {
             continue;
         }
         let idsc = MIN_SIMD_LEN + i;
-        return (idsc, find_temperature(data, idsc));
+        return (idsc, find_temperature_swar(data, idsc));
     }
     // Safety: names are less that 100 caracters
     unsafe { unreachable_unchecked() }
@@ -124,30 +124,25 @@ fn simd_search(data: &[u8]) -> (usize, usize) {
 
 fn slow_search(data: &[u8], skipped: usize) -> Option<(usize, usize)> {
     let idsc = memchr::memchr(b';', &data[skipped - 1..])? + skipped - 1;
-    let idnl = find_temperature(data, idsc);
+    let idnl = find_temperature_swar(data, idsc);
     Some((idsc, idnl))
 }
 
-#[inline(always)]
-fn find_temperature(data: &[u8], offset: usize) -> usize {
+type tsize = u64;
+static SWAR_LEN_T: usize = ::std::mem::size_of::<tsize>();
+fn find_temperature_swar(data: &[u8], offset: usize) -> usize {
+    static PATTERN: tsize = mk_splat!(u64; b'\n');
+    static LOW_MAGIC: tsize = mk_splat!(u64; 0x01);
+    static HIGH_MAGIC: tsize = mk_splat!(u64; 0x80);
     let offset = offset + 1;
-    let data = &data[offset..];
 
-    let res = if data.len() < 8 {
-        // nearly never run
-        data.iter().position(|x| *x == b'\n').unwrap()
-    } else {
-        let data: &[u8] = data;
-        debug_assert!(data.len() >= 8);
-        // SAFETY: We assume the buffer has at least 8 bytes available
-        let chunk = unsafe { (data.as_ptr() as *const u64).read_unaligned() };
-        let pattern = mk_splat!(u64; b'\n');
-        let xored = chunk ^ pattern;
-        let low_magic = mk_splat!(u64; 0x01);
-        let high_magic = mk_splat!(u64; 0x80);
-        let mask = (xored.wrapping_sub(low_magic)) & !xored & high_magic;
-        (mask.trailing_zeros() >> 3) as usize
+    let chunk = unsafe {
+        let ptr = data.as_ptr().add(offset.min(data.len() - SWAR_LEN_T));
+        (ptr as *const tsize).read_unaligned()
     };
+    let xored = chunk ^ PATTERN;
+    let mask = (xored.wrapping_sub(LOW_MAGIC)) & !xored & HIGH_MAGIC;
+    let res = (mask.trailing_zeros() >> 3) as usize;
     res + offset
 }
 
@@ -169,7 +164,6 @@ fn sawr_station_search(data: &[u8]) -> usize {
     unsafe { tail.unwrap_unchecked() }
 }
 
-#[inline(always)]
 fn swar_inner(data: &[u8], offset: usize) -> Option<usize> {
     static PATTERN: ssize = mk_splat!(ssize; b';');
     static LOW_MAGIC: ssize = mk_splat!(ssize; 0x01);
@@ -188,13 +182,15 @@ fn swar_inner(data: &[u8], offset: usize) -> Option<usize> {
 
 fn compute_shape(str: &[u8], start: usize, end: usize) -> (bool, bool) {
     let n = end - start;
-    let sign = str[start] == b'-';
-    let has_4th = ((n & 4) != 0) & (((n & 1) != 0) | !sign);
-    (sign, has_4th)
+    unsafe {
+        let sign = *str.get_unchecked(start) == b'-';
+        // let has_4th = str.get_unchecked(end - 4).is_ascii_digit();
+        let has_4th = ((n & 4) != 0) & (((n & 1) != 0) | !sign);
+        (sign, has_4th)
+    }
 }
 
-// #[inline(never)]
-fn parse_value(str: &[u8], start: usize, end: usize) -> fsize {
+fn old_parse(str: &[u8], start: usize, end: usize) -> fsize {
     let (sign, has_4th) = compute_shape(str, start, end);
 
     let res: i16 = [(1, 1), (3, 10), (4, 100 * (has_4th as fsize))]
@@ -204,7 +200,41 @@ fn parse_value(str: &[u8], start: usize, end: usize) -> fsize {
             (*v & 0x0F) as fsize * mul
         })
         .sum();
+    let mask = -(sign as fsize);
+    (res ^ mask) - mask
+}
 
+fn semi_smart(str: &[u8], start: usize, end: usize) -> fsize {
+    let dec = unsafe { *str.get_unchecked(end - 1) & 0x0F } as i16;
+    let unit = unsafe { *str.get_unchecked(end - 3) & 0x0F } as i16;
+    let raw_ten = unsafe { *str.get_unchecked(end - 4) };
+    let ten = (raw_ten & 0x0F) as i16;
+
+    let has_4th = (raw_ten != b';') & (raw_ten != b'-');
+    let sign = unsafe { *str.get_unchecked(start) == b'-' };
+
+    let res = dec + 10 * unit + 100 * (has_4th as i16) * ten;
+    let mask = -(sign as fsize);
+    (res ^ mask) - mask
+}
+
+// #[inline(never)]
+fn parse_value(str: &[u8], start: usize, end: usize) -> fsize {
+    // I hate endiness
+    #[cfg(target_endian = "big")]
+    compile_error!("This code only supports little-endian systems.");
+
+    // only one load
+    let chunk = unsafe { (str.as_ptr().add(end - 4) as *const u32).read_unaligned() };
+    let sign = unsafe { *str.get_unchecked(start) } == b'-';
+
+    let dec = ((chunk >> 24) as u8  & 0x0F) as i16;
+    let unit = ((chunk >> 8) as u8  & 0x0F) as i16;
+    // parse and check at once
+    let ten = (chunk as u8).wrapping_sub(b'0') ;
+    let has_4th = ten < 10;
+
+    let res = dec + 10 * unit + 100 * (has_4th as i16) * (ten as i16);
     let mask = -(sign as fsize);
     (res ^ mask) - mask
 }
