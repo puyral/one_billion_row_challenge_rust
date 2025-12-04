@@ -1,6 +1,7 @@
 #![feature(portable_simd)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(int_lowest_highest_one)]
+#![feature(ascii_char)]
 #![allow(unused)]
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -96,13 +97,14 @@ fn main() {
 fn process(f: &[u8], n: usize, chunk_size: usize, last: bool) -> (HMap, FxHashSet<ArrayType>) {
     let iter = {
         let start = refine_start(f, n * chunk_size);
-        let f = &f[start..];
-        let size = if last {
-            f.len()
+        // let f = &f[start..];
+        let end = if last {
+            f.len()-1
         } else {
-            chunk_size - (n * chunk_size - start)
+            (n+1)*chunk_size
+            // chunk_size - (n * chunk_size - start)
         };
-        Finder::new(f, size)
+        Finder::new(f, start, end)
     };
 
     let mut stats = init_map();
