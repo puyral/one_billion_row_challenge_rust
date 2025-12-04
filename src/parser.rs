@@ -55,7 +55,7 @@ type u8xx = u8x16;
 #[allow(nonstandard_style)]
 type ssize = u128;
 
-static SWAR_STATION: bool = true;
+static SWAR_STATION: bool = false;
 
 static MIN_LEN: usize = if SWAR_STATION {
     MIN_SWAR_LEN
@@ -70,7 +70,7 @@ macro_rules! mk_splat {
     };
 }
 
-#[inline(never)]
+// #[inline(never)]
 fn find_next(data: &[u8]) -> Option<(usize, usize)> {
     if data.len() < MIN_LEN {
         // rare slow path
